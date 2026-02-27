@@ -1,0 +1,5 @@
+{
+  "name": "EIM Class Fund Manager",
+  "description": "A batch contribution and expense management app for EIM NC2 class with multi-admin roles, audit trails, and financial tracking.",
+  "requestFramePermissions": []
+}

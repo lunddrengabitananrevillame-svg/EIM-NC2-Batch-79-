@@ -1,0 +1,39 @@
+import { Routes, Route, Navigate } from "react-router-dom";
+import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
+import Members from "./pages/Members";
+import Contributions from "./pages/Contributions";
+import ContributionDetails from "./pages/ContributionDetails";
+import Expenses from "./pages/Expenses";
+import AuditLogs from "./pages/AuditLogs";
+import Reports from "./pages/Reports";
+import Settings from "./pages/Settings";
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Dashboard />} />
+        <Route path="members" element={<Members />} />
+        <Route path="contributions" element={<Contributions />} />
+        <Route path="contributions/:id" element={<ContributionDetails />} />
+        <Route path="expenses" element={<Expenses />} />
+        <Route path="logs" element={<AuditLogs />} />
+        <Route path="reports" element={<Reports />} />
+        <Route path="settings" element={<Settings />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
