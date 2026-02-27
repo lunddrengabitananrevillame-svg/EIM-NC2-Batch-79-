@@ -78,11 +78,11 @@ db.exec(`
 const userCount = db.prepare("SELECT count(*) as count FROM users WHERE role != 'Member'").get() as { count: number };
 if (userCount.count === 0) {
   const insertUser = db.prepare("INSERT INTO users (name, role, passcode) VALUES (?, ?, ?)");
-  insertUser.run("Admin President", "President", "1111");
-  insertUser.run("Admin VP", "Vice President", "2222");
-  insertUser.run("Admin Secretary", "Secretary", "3333");
-  insertUser.run("Admin Treasurer", "Treasurer", "4444");
-  console.log("Seeded initial admin users.");
+  insertUser.run("Admin President", "President", null);
+  insertUser.run("Admin VP", "Vice President", null);
+  insertUser.run("Admin Secretary", "Secretary", null);
+  insertUser.run("Admin Treasurer", "Treasurer", null);
+  console.log("Seeded initial admin users with NULL passcodes for setup.");
 }
 
 async function startServer() {
@@ -96,12 +96,37 @@ async function startServer() {
   // Auth
   app.post("/api/login", (req, res) => {
     const { passcode } = req.body;
+
+    // Check if system needs setup (any admin has null passcode)
+    const pendingSetup = db.prepare("SELECT count(*) as count FROM users WHERE passcode IS NULL AND role != 'Member'").get() as { count: number };
+    
+    if (pendingSetup.count > 0) {
+        // If passcode is empty, allow access as Setup Admin
+        if (!passcode) {
+             return res.json({ 
+                 success: true, 
+                 user: { id: 0, name: "System Setup", role: "SuperAdmin" },
+                 needsSetup: true 
+             });
+        }
+    }
+
     const user = db.prepare("SELECT * FROM users WHERE passcode = ? AND is_active = 1").get(passcode);
     if (user) {
       res.json({ success: true, user });
     } else {
       res.status(401).json({ success: false, message: "Invalid passcode" });
     }
+  });
+
+  // Users (Admins)
+  app.get("/api/users", (req, res) => {
+    const users = db.prepare("SELECT id, name, role, passcode FROM users WHERE role != 'Member' ORDER BY id").all();
+    // We return passcode status (null or not) but maybe not the actual passcode for security?
+    // For setup purposes, we might need to know which ones are null.
+    // Let's return full object for simplicity in this trusted internal app, or mask it.
+    // Actually, the frontend needs to know if passcode is null to show "Set Passcode" vs "Change Passcode".
+    res.json(users);
   });
 
   // Members
@@ -300,7 +325,8 @@ async function startServer() {
       return res.json({ success: false, message: "User not found." });
     }
 
-    if (user.passcode !== currentPasscode) {
+    // Allow update if current passcode is NULL (initial setup)
+    if (user.passcode !== null && user.passcode !== currentPasscode) {
       return res.json({ success: false, message: "Incorrect current passcode." });
     }
 

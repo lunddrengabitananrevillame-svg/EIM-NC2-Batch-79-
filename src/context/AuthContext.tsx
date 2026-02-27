@@ -3,7 +3,7 @@ import { User } from "../types";
 
 interface AuthContextType {
   user: User | null;
-  login: (passcode: string) => Promise<boolean>;
+  login: (passcode: string) => Promise<{ success: boolean; needsSetup?: boolean }>;
   loginAsGuest: () => void;
   logout: () => void;
   isLoading: boolean;
@@ -34,12 +34,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.success) {
         setUser(data.user);
         localStorage.setItem("eim_user", JSON.stringify(data.user));
-        return true;
+        return { success: true, needsSetup: data.needsSetup };
       }
-      return false;
+      return { success: false };
     } catch (error) {
       console.error("Login error:", error);
-      return false;
+      return { success: false };
     }
   };
 

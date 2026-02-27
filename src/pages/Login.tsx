@@ -10,9 +10,13 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const success = await login(passcode);
-    if (success) {
-      navigate("/");
+    const result = await login(passcode);
+    if (result.success) {
+      if (result.needsSetup) {
+        navigate("/settings");
+      } else {
+        navigate("/");
+      }
     } else {
       setError("Invalid passcode. Please try again.");
     }
@@ -34,9 +38,8 @@ export default function Login() {
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
               className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Enter your 4-digit passcode"
+              placeholder="Enter your 4-digit passcode (Leave empty for first setup)"
               maxLength={4}
-              required
             />
           </div>
           {error && <p className="text-red-500 text-sm">{error}</p>}
