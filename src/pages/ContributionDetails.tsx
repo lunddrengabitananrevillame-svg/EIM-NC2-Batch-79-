@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { Contribution, Member, Payment } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { formatCurrency, formatDate } from "../lib/utils";
-import { CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { CheckCircle, XCircle, AlertCircle, X, Search, Filter } from "lucide-react";
 
 export default function ContributionDetails() {
   const { id } = useParams();
@@ -13,6 +13,12 @@ export default function ContributionDetails() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [deletePaymentId, setDeletePaymentId] = useState<number | null>(null);
+  
+  // Smart Features State
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Unpaid">("All");
+
   const { user } = useAuth();
 
   const fetchData = useCallback(async () => {
@@ -61,6 +67,21 @@ export default function ContributionDetails() {
     fetchData();
   };
 
+  const handleDeletePayment = async () => {
+    if (!deletePaymentId) return;
+
+    await fetch(`/api/payments/${deletePaymentId}`, {
+      method: "DELETE",
+      headers: {
+        "x-admin-id": user?.id?.toString() || "",
+        "x-admin-name": user?.name || "",
+      },
+    });
+
+    setDeletePaymentId(null);
+    fetchData();
+  };
+
   if (!contribution) return <div>Loading...</div>;
 
   const memberStatus = members.map((member) => {
@@ -74,17 +95,46 @@ export default function ContributionDetails() {
     return { ...member, totalPaid, balance, status, memberPayments };
   });
 
+  // Smart Filtering
+  const filteredMembers = memberStatus.filter((m) => {
+    const matchesSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = 
+      statusFilter === "All" ? true :
+      statusFilter === "Paid" ? m.status === "Paid" :
+      m.status !== "Paid"; // Unpaid includes Partial and Unpaid
+    return matchesSearch && matchesFilter;
+  });
+
   const totalCollected = payments.reduce((sum, p) => sum + p.amount_paid, 0);
   const expectedTotal = members.length * contribution.amount_per_person;
+  const outstandingBalance = expectedTotal - totalCollected;
+  
+  const paidCount = memberStatus.filter(m => m.status === "Paid").length;
+  const progress = members.length > 0 ? (paidCount / members.length) * 100 : 0;
 
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">
-          {contribution.title}
-        </h1>
-        <p className="text-gray-500 mb-4">{contribution.purpose}</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">
+              {contribution.title}
+            </h1>
+            <p className="text-gray-500">{contribution.purpose}</p>
+          </div>
+          <div className="mt-4 md:mt-0 text-right">
+             <div className="text-sm text-gray-500 mb-1">Collection Progress</div>
+             <div className="flex items-center gap-2">
+                <div className="w-32 md:w-48 h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-green-600 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                </div>
+                <span className="text-sm font-medium text-gray-700">{Math.round(progress)}%</span>
+             </div>
+             <div className="text-xs text-gray-400 mt-1">{paidCount} of {members.length} members paid</div>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm border-t pt-4">
           <div>
             <span className="text-gray-500">Amount per Person:</span>
             <span className="font-semibold ml-2">
@@ -92,21 +142,45 @@ export default function ContributionDetails() {
             </span>
           </div>
           <div>
-            <span className="text-gray-500">Due Date:</span>
-            <span className="font-semibold ml-2">
-              {formatDate(contribution.due_date)}
-            </span>
-          </div>
-          <div>
             <span className="text-gray-500">Total Collected:</span>
             <span className="font-semibold ml-2 text-green-600">
               {formatCurrency(totalCollected)}
             </span>
-            <span className="text-gray-400 mx-1">/</span>
-            <span className="text-gray-500">
-              {formatCurrency(expectedTotal)}
+          </div>
+          <div>
+            <span className="text-gray-500">Outstanding:</span>
+            <span className="font-semibold ml-2 text-red-500">
+              {formatCurrency(outstandingBalance)}
             </span>
           </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <input 
+            type="text" 
+            placeholder="Search member..." 
+            className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex bg-gray-100 p-1 rounded-lg">
+          {(["All", "Paid", "Unpaid"] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+                statusFilter === status 
+                  ? "bg-white text-gray-900 shadow-sm" 
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {status === "Unpaid" ? "Unpaid / Partial" : status}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -124,74 +198,91 @@ export default function ContributionDetails() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {memberStatus.map((ms) => (
-                <tr key={ms.id} className="hover:bg-gray-50 transition">
-                  <td className="px-6 py-4 font-medium text-gray-900">
-                    {ms.name}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        ms.status === "Paid"
-                          ? "bg-green-100 text-green-800"
-                          : ms.status === "Partial"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {ms.status === "Paid" && <CheckCircle className="w-3 h-3" />}
-                      {ms.status === "Partial" && (
-                        <AlertCircle className="w-3 h-3" />
-                      )}
-                      {ms.status === "Unpaid" && <XCircle className="w-3 h-3" />}
-                      {ms.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-gray-500">
-                    {formatCurrency(ms.totalPaid)}
-                  </td>
-                  <td className="px-6 py-4 text-gray-500">
-                    {formatCurrency(ms.balance)}
-                  </td>
-                  <td className="px-6 py-4 text-gray-500">
-                    {ms.memberPayments.length > 0 ? (
-                      <div className="space-y-1">
-                        {ms.memberPayments.map((p) => (
-                          <div key={p.id} className="text-xs flex flex-col sm:flex-row sm:items-center gap-1">
-                            <span className="font-medium text-gray-900">
-                              {formatCurrency(p.amount_paid)}
-                            </span>
-                            <span className="hidden sm:inline text-gray-300">•</span>
-                            <span className="text-gray-500">
-                              {new Date(p.date_paid).toLocaleDateString()}
-                            </span>
-                            <span className="hidden sm:inline text-gray-300">•</span>
-                            <span className="italic text-gray-400">
-                              by {p.admin_name || "Unknown"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400 text-xs">-</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    {ms.status !== "Paid" && user?.role !== "Guest" && (
-                      <button
-                        onClick={() => {
-                          setSelectedMember(ms);
-                          setPaymentAmount(ms.balance.toString()); // Default to full balance
-                          setIsModalOpen(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 font-medium text-xs"
+              {filteredMembers.length > 0 ? (
+                filteredMembers.map((ms) => (
+                  <tr key={ms.id} className="hover:bg-gray-50 transition">
+                    <td className="px-6 py-4 font-medium text-gray-900">
+                      {ms.name}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          ms.status === "Paid"
+                            ? "bg-green-100 text-green-800"
+                            : ms.status === "Partial"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
                       >
-                        Record Payment
-                      </button>
-                    )}
+                        {ms.status === "Paid" && <CheckCircle className="w-3 h-3" />}
+                        {ms.status === "Partial" && (
+                          <AlertCircle className="w-3 h-3" />
+                        )}
+                        {ms.status === "Unpaid" && <XCircle className="w-3 h-3" />}
+                        {ms.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-gray-500">
+                      {formatCurrency(ms.totalPaid)}
+                    </td>
+                    <td className="px-6 py-4 text-gray-500">
+                      {formatCurrency(ms.balance)}
+                    </td>
+                    <td className="px-6 py-4 text-gray-500">
+                      {ms.memberPayments.length > 0 ? (
+                        <div className="space-y-1">
+                          {ms.memberPayments.map((p) => (
+                            <div key={p.id} className="text-xs flex flex-col sm:flex-row sm:items-center gap-1">
+                              <span className="font-medium text-gray-900">
+                                {formatCurrency(p.amount_paid)}
+                              </span>
+                              <span className="hidden sm:inline text-gray-300">•</span>
+                              <span className="text-gray-500">
+                                {new Date(p.date_paid).toLocaleDateString()}
+                              </span>
+                              <span className="hidden sm:inline text-gray-300">•</span>
+                              <span className="italic text-gray-400">
+                                by {p.admin_name || "Unknown"}
+                              </span>
+                              {user?.role !== "Guest" && (
+                                <button
+                                  onClick={() => setDeletePaymentId(p.id)}
+                                  className="text-gray-400 hover:text-red-600 transition p-0.5 ml-1"
+                                  title="Revert Payment"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-xs">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {ms.status !== "Paid" && user?.role !== "Guest" && (
+                        <button
+                          onClick={() => {
+                            setSelectedMember(ms);
+                            setPaymentAmount(ms.balance.toString()); // Default to full balance
+                            setIsModalOpen(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-800 font-medium text-xs"
+                        >
+                          Record Payment
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                    No members found matching your search or filter.
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -240,6 +331,31 @@ export default function ContributionDetails() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deletePaymentId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+            <h2 className="text-xl font-bold text-red-600 mb-2">Revert Payment</h2>
+            <p className="text-gray-700 mb-6">
+              Are you sure you want to delete this payment record? This will increase the member's balance.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeletePaymentId(null)}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeletePayment}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+              >
+                Revert
+              </button>
+            </div>
           </div>
         </div>
       )}

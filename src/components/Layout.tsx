@@ -12,6 +12,7 @@ import {
   X,
   FileText,
   Settings,
+  History,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -24,9 +25,10 @@ export default function Layout() {
     { name: "Dashboard", path: "/", icon: LayoutDashboard },
     { name: "Members", path: "/members", icon: Users },
     { name: "Contributions", path: "/contributions", icon: Wallet },
+    { name: "Member Contributions", path: "/member-contributions", icon: ClipboardList },
     { name: "Expenses", path: "/expenses", icon: Receipt },
     { name: "Reports", path: "/reports", icon: FileText },
-    { name: "Audit Logs", path: "/logs", icon: ClipboardList },
+    { name: "Audit Logs", path: "/logs", icon: History },
   ];
 
   if (user?.role !== "Guest") {
@@ -86,7 +88,7 @@ export default function Layout() {
 
         {/* Mobile Sidebar Overlay */}
         {isMobileMenuOpen && (
-          <div className="fixed inset-0 z-10 bg-slate-900/95 pt-20 px-4 md:hidden">
+          <div className="fixed inset-0 z-50 bg-slate-900/95 pt-20 px-4 md:hidden">
             <nav className="space-y-2">
               {navItems.map((item) => (
                 <Link

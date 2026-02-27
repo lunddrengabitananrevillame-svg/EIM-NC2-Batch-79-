@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import ExcelJS from "exceljs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -237,6 +238,41 @@ async function startServer() {
     res.json({ id: info.lastInsertRowid });
   });
 
+  app.delete("/api/expenses/:id", (req, res) => {
+    const adminId = req.headers['x-admin-id'];
+    const adminName = req.headers['x-admin-name'];
+
+    const expense = db.prepare("SELECT * FROM expenses WHERE id = ?").get(req.params.id) as any;
+    if (!expense) return res.status(404).json({ success: false, message: "Expense not found" });
+
+    db.prepare("DELETE FROM expenses WHERE id = ?").run(req.params.id);
+
+    if (adminId) {
+        db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(adminId, adminName, "Delete Expense", `Deleted expense: ${expense.item_name} (${expense.total_cost})`);
+    }
+
+    res.json({ success: true });
+  });
+
+  app.delete("/api/payments/:id", (req, res) => {
+    const adminId = req.headers['x-admin-id'];
+    const adminName = req.headers['x-admin-name'];
+
+    const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(req.params.id) as any;
+    if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
+
+    const member = db.prepare("SELECT name FROM members WHERE id = ?").get(payment.member_id) as any;
+    const memberName = member ? member.name : 'Unknown Member';
+
+    db.prepare("DELETE FROM payments WHERE id = ?").run(req.params.id);
+
+    if (adminId) {
+        db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(adminId, adminName, "Revert Payment", `Reverted payment of ${payment.amount_paid} for ${memberName}`);
+    }
+
+    res.json({ success: true });
+  });
+
   // Audit Logs
   app.get("/api/logs", (req, res) => {
     const logs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100").all();
@@ -273,6 +309,109 @@ async function startServer() {
     db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(userId, user.name, "Change Passcode", "Updated personal passcode");
 
     res.json({ success: true });
+  });
+
+  app.get("/api/reports/excel", async (req, res) => {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'EIM Fund Manager';
+      workbook.lastModifiedBy = 'System';
+      workbook.created = new Date();
+      workbook.modified = new Date();
+
+      // --- Summary Sheet ---
+      const summarySheet = workbook.addWorksheet('Summary');
+      summarySheet.columns = [
+        { header: 'Metric', key: 'metric', width: 30 },
+        { header: 'Value', key: 'value', width: 20 },
+      ];
+      
+      const totalCollected = db.prepare("SELECT SUM(amount_paid) as total FROM payments").get() as { total: number };
+      const totalSpent = db.prepare("SELECT SUM(total_cost) as total FROM expenses").get() as { total: number };
+      const balance = (totalCollected.total || 0) - (totalSpent.total || 0);
+
+      summarySheet.addRow({ metric: 'Total Collected', value: totalCollected.total || 0 });
+      summarySheet.addRow({ metric: 'Total Spent', value: totalSpent.total || 0 });
+      summarySheet.addRow({ metric: 'Current Balance', value: balance });
+      summarySheet.addRow({ metric: 'Report Generated At', value: new Date().toLocaleString() });
+
+      // --- Members Sheet ---
+      const membersSheet = workbook.addWorksheet('Members');
+      membersSheet.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Name', key: 'name', width: 30 },
+        { header: 'Student ID', key: 'student_id', width: 20 },
+        { header: 'Contact Info', key: 'contact_info', width: 25 },
+        { header: 'Status', key: 'status', width: 15 },
+      ];
+      const members = db.prepare("SELECT * FROM members").all();
+      members.forEach((m: any) => membersSheet.addRow(m));
+
+      // --- Contributions Sheet ---
+      const contributionsSheet = workbook.addWorksheet('Contributions');
+      contributionsSheet.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Title', key: 'title', width: 30 },
+        { header: 'Purpose', key: 'purpose', width: 40 },
+        { header: 'Amount/Person', key: 'amount_per_person', width: 15 },
+        { header: 'Due Date', key: 'due_date', width: 15 },
+        { header: 'Created By', key: 'created_by', width: 15 },
+        { header: 'Created At', key: 'created_at', width: 20 },
+      ];
+      const contributions = db.prepare("SELECT * FROM contributions").all();
+      contributions.forEach((c: any) => contributionsSheet.addRow(c));
+
+      // --- Payments Sheet ---
+      const paymentsSheet = workbook.addWorksheet('Payments');
+      paymentsSheet.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Contribution ID', key: 'contribution_id', width: 15 },
+        { header: 'Member ID', key: 'member_id', width: 15 },
+        { header: 'Amount Paid', key: 'amount_paid', width: 15 },
+        { header: 'Received By', key: 'received_by', width: 15 },
+        { header: 'Date Paid', key: 'date_paid', width: 20 },
+      ];
+      const payments = db.prepare("SELECT * FROM payments").all();
+      payments.forEach((p: any) => paymentsSheet.addRow(p));
+
+      // --- Expenses Sheet ---
+      const expensesSheet = workbook.addWorksheet('Expenses');
+      expensesSheet.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Item Name', key: 'item_name', width: 30 },
+        { header: 'Category', key: 'category', width: 20 },
+        { header: 'Specification', key: 'specification', width: 25 },
+        { header: 'Quantity', key: 'quantity', width: 10 },
+        { header: 'Price/Unit', key: 'price_per_unit', width: 15 },
+        { header: 'Total Cost', key: 'total_cost', width: 15 },
+        { header: 'Purchased By', key: 'purchased_by', width: 15 },
+        { header: 'Date Purchased', key: 'date_purchased', width: 20 },
+      ];
+      const expenses = db.prepare("SELECT * FROM expenses").all();
+      expenses.forEach((e: any) => expensesSheet.addRow(e));
+
+      // --- Audit Logs Sheet ---
+      const logsSheet = workbook.addWorksheet('Audit Logs');
+      logsSheet.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'User ID', key: 'user_id', width: 10 },
+        { header: 'User Name', key: 'user_name', width: 20 },
+        { header: 'Action', key: 'action', width: 25 },
+        { header: 'Details', key: 'details', width: 50 },
+        { header: 'Timestamp', key: 'timestamp', width: 20 },
+      ];
+      const logs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC").all();
+      logs.forEach((l: any) => logsSheet.addRow(l));
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=EIM_Fund_Report.xlsx');
+
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (error) {
+      console.error("Error generating Excel report:", error);
+      res.status(500).send("Error generating report");
+    }
   });
 
   // Vite middleware for development

@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import Members from "./pages/Members";
 import Contributions from "./pages/Contributions";
 import ContributionDetails from "./pages/ContributionDetails";
+import MemberContributions from "./pages/MemberContributions";
 import Expenses from "./pages/Expenses";
 import AuditLogs from "./pages/AuditLogs";
 import Reports from "./pages/Reports";
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="members" element={<Members />} />
         <Route path="contributions" element={<Contributions />} />
         <Route path="contributions/:id" element={<ContributionDetails />} />
+        <Route path="member-contributions" element={<MemberContributions />} />
         <Route path="expenses" element={<Expenses />} />
         <Route path="logs" element={<AuditLogs />} />
         <Route path="reports" element={<Reports />} />
