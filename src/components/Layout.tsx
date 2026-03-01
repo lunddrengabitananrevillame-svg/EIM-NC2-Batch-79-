@@ -13,6 +13,7 @@ import {
   FileText,
   Settings,
   History,
+  Calculator,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -31,6 +32,10 @@ export default function Layout() {
     { name: "Audit Logs", path: "/logs", icon: History },
   ];
 
+  if (user?.role === "President") {
+    navItems.push({ name: "Settlements", path: "/settlements", icon: Calculator });
+  }
+
   if (user?.role !== "Guest") {
     navItems.push({ name: "Settings", path: "/settings", icon: Settings });
   }
@@ -46,7 +51,7 @@ export default function Layout() {
             {user?.role}
           </span>
         </div>
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto p-4 space-y-1">
           {navItems.map((item) => (
             <Link
               key={item.name}
@@ -88,7 +93,7 @@ export default function Layout() {
 
         {/* Mobile Sidebar Overlay */}
         {isMobileMenuOpen && (
-          <div className="fixed inset-0 z-50 bg-slate-900/95 pt-20 px-4 md:hidden">
+          <div className="fixed inset-0 z-50 bg-slate-900/95 pt-20 px-4 md:hidden overflow-y-auto pb-4">
             <nav className="space-y-2">
               {navItems.map((item) => (
                 <Link
@@ -123,7 +128,7 @@ export default function Layout() {
             <Outlet />
           </div>
           <footer className="mt-8 text-center text-xs text-gray-400 py-4 border-t border-gray-200">
-            <p>&copy; {new Date().getFullYear()} EIM Fund Manager. All rights reserved.</p>
+            <p>&copy; {new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", year: "numeric" })} EIM Fund Manager. All rights reserved.</p>
             <p className="mt-1 font-medium">Created by LUNDDREN REVILLAME (EIM Batch 79)</p>
           </footer>
         </main>

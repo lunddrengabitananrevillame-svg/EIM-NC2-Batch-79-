@@ -57,3 +57,13 @@ export interface AuditLog {
   details: string;
   timestamp: string;
 }
+
+export interface Settlement {
+  id: number;
+  member_id: number;
+  amount: number;
+  type: "Refund" | "Payment";
+  handled_by: number;
+  date_handled: string;
+  admin_name?: string;
+}

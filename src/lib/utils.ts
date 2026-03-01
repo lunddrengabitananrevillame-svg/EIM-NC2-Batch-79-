@@ -14,11 +14,20 @@ export const formatCurrency = (amount: number) => {
 
 export const formatDate = (dateString: string) => {
   if (!dateString) return "";
-  return new Date(dateString).toLocaleDateString("en-PH", {
+  
+  // If the date string comes from SQLite CURRENT_TIMESTAMP (YYYY-MM-DD HH:MM:SS),
+  // it is in UTC. We append 'Z' to ensure it's parsed as UTC.
+  let parsedDate = dateString;
+  if (!dateString.includes('T') && !dateString.includes('Z')) {
+    parsedDate = dateString.replace(' ', 'T') + 'Z';
+  }
+
+  return new Date(parsedDate).toLocaleDateString("en-PH", {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Asia/Manila"
   });
 };

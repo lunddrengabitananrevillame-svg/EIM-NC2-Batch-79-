@@ -6,6 +6,8 @@ import { Member, Contribution, Payment } from "../types";
 interface MemberContributionSummary {
   memberId: number;
   memberName: string;
+  studentId: string;
+  contactInfo: string;
   contributions: {
     contributionId: number;
     contributionTitle: string;
@@ -73,6 +75,8 @@ export default function MemberContributions() {
           return {
             memberId: member.id,
             memberName: member.name,
+            studentId: member.student_id || "",
+            contactInfo: member.contact_info || "",
             contributions: memberContributions,
             totalPaid: memberTotalPaid,
             totalDue: memberTotalDue,
@@ -118,9 +122,44 @@ export default function MemberContributions() {
     return sortableItems;
   }, [data, sortConfig]);
 
-  const filteredData = sortedData.filter((item) =>
-    item.memberName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredData = sortedData.filter((item) => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      item.memberName.toLowerCase().includes(searchLower) ||
+      item.studentId.toLowerCase().includes(searchLower) ||
+      item.contactInfo.toLowerCase().includes(searchLower)
+    );
+  });
+
+  const columnTotals = React.useMemo(() => {
+    const totals: Record<number, number> = {};
+    contributions.forEach(c => totals[c.id] = 0);
+    let grandTotal = 0;
+    
+    filteredData.forEach(row => {
+      row.contributions.forEach(c => {
+        totals[c.contributionId] += c.amountPaid;
+      });
+      grandTotal += row.totalPaid;
+    });
+    
+    return { totals, grandTotal };
+  }, [filteredData, contributions]);
+
+  const absoluteTotals = React.useMemo(() => {
+    const totals: Record<number, number> = {};
+    contributions.forEach(c => totals[c.id] = 0);
+    let grandTotal = 0;
+    
+    data.forEach(row => {
+      row.contributions.forEach(c => {
+        totals[c.contributionId] += c.amountPaid;
+      });
+      grandTotal += row.totalPaid;
+    });
+    
+    return { totals, grandTotal };
+  }, [data, contributions]);
 
   if (loading) return (
     <div className="flex justify-center items-center h-64">
@@ -140,7 +179,7 @@ export default function MemberContributions() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
           <input
             type="text"
-            placeholder="Search member..."
+            placeholder="Search by name, ID, or contact..."
             className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -229,6 +268,36 @@ export default function MemberContributions() {
                 </tr>
               )}
             </tbody>
+            <tfoot className="bg-gray-50 font-semibold sticky bottom-0 z-20 shadow-[0_-2px_5px_-2px_rgba(0,0,0,0.1)]">
+              {searchTerm && (
+                <tr className="bg-blue-50/50 text-sm">
+                  <td className="px-4 py-3 sm:sticky left-0 bg-blue-50 z-30 border-t border-r border-blue-100 text-blue-900 italic">
+                    Total (Filtered)
+                  </td>
+                  {contributions.map((c) => (
+                    <td key={c.id} className="px-4 py-3 text-center border-t border-blue-100 text-blue-700 italic">
+                      {formatCurrency(columnTotals.totals[c.id] || 0)}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3 text-right sm:sticky right-0 bg-blue-50 z-30 border-t border-l border-blue-100 text-blue-800 italic">
+                    {formatCurrency(columnTotals.grandTotal)}
+                  </td>
+                </tr>
+              )}
+              <tr className="bg-gray-100">
+                <td className="px-4 py-4 sm:sticky left-0 bg-gray-100 z-30 border-t border-r border-gray-200 text-gray-900 uppercase tracking-wider text-xs">
+                  Grand Total (All Members)
+                </td>
+                {contributions.map((c) => (
+                  <td key={c.id} className="px-4 py-4 text-center border-t border-gray-200 text-green-700 text-base">
+                    {formatCurrency(absoluteTotals.totals[c.id] || 0)}
+                  </td>
+                ))}
+                <td className="px-4 py-4 text-right sm:sticky right-0 bg-gray-100 z-30 border-t border-l border-gray-200 text-blue-700 text-base">
+                  {formatCurrency(absoluteTotals.grandTotal)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
         <div className="bg-gray-50 border-t border-gray-200 p-3 text-xs text-gray-500 flex justify-between items-center">

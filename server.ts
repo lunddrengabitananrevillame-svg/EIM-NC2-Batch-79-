@@ -64,6 +64,17 @@ db.exec(`
     FOREIGN KEY(purchased_by) REFERENCES users(id)
   );
 
+  CREATE TABLE IF NOT EXISTS settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    type TEXT NOT NULL, -- 'Refund' or 'Payment'
+    handled_by INTEGER,
+    date_handled TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(member_id) REFERENCES members(id),
+    FOREIGN KEY(handled_by) REFERENCES users(id)
+  );
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -92,6 +103,10 @@ async function startServer() {
   app.use(express.json());
 
   // API Routes
+  app.use('/api', (req, res, next) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    next();
+  });
   
   // Auth
   app.post("/api/login", (req, res) => {
@@ -158,22 +173,27 @@ async function startServer() {
   });
 
   app.delete("/api/members/:id", (req, res) => {
-    const { admin_id, admin_name } = req.body; // Pass admin info in body for delete too? Or headers. For simplicity, assume body or query.
-    // Actually DELETE usually doesn't have body in some clients, but express supports it. Let's use query params or headers for admin info if needed, or just body.
-    // For simplicity, let's assume the frontend sends a JSON body even with DELETE, or we use a POST for 'delete-action'.
-    // Standard REST: DELETE /api/members/:id. We need to know WHO did it.
-    // Let's use a custom header 'x-admin-id' and 'x-admin-name' for simplicity in this project.
-    
-    const adminId = req.headers['x-admin-id'];
-    const adminName = req.headers['x-admin-name'];
+    try {
+      const adminId = req.headers['x-admin-id'];
+      const adminName = req.headers['x-admin-name'];
 
-    db.prepare("DELETE FROM members WHERE id = ?").run(req.params.id);
-    
-    if (adminId) {
-        db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(adminId, adminName, "Delete Member", `Deleted member ID: ${req.params.id}`);
+      // Prevent deletion if member has payments to avoid FOREIGN KEY constraint failed
+      const paymentsCount = db.prepare("SELECT count(*) as count FROM payments WHERE member_id = ?").get(req.params.id) as { count: number };
+      if (paymentsCount.count > 0) {
+        return res.status(400).json({ success: false, message: "Cannot delete member with existing payment records." });
+      }
+
+      db.prepare("DELETE FROM members WHERE id = ?").run(req.params.id);
+      
+      if (adminId) {
+          db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(adminId, adminName, "Delete Member", `Deleted member ID: ${req.params.id}`);
+      }
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting member:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
     }
-    
-    res.json({ success: true });
   });
 
   // Contributions
@@ -238,6 +258,27 @@ async function startServer() {
     const info = stmt.run(contribution_id, member_id, amount_paid, admin_id);
 
     db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(admin_id, admin_name, "Record Payment", `Recorded payment of ${amount_paid} for member ID ${member_id}`);
+
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  // Settlements
+  app.get("/api/settlements", (req, res) => {
+    const settlements = db.prepare(`
+      SELECT s.*, u.name as admin_name
+      FROM settlements s
+      LEFT JOIN users u ON s.handled_by = u.id
+      ORDER BY s.date_handled DESC
+    `).all();
+    res.json(settlements);
+  });
+
+  app.post("/api/settlements", (req, res) => {
+    const { member_id, amount, type, admin_id, admin_name } = req.body;
+    const stmt = db.prepare("INSERT INTO settlements (member_id, amount, type, handled_by) VALUES (?, ?, ?, ?)");
+    const info = stmt.run(member_id, amount, type, admin_id);
+
+    db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?, ?, ?, ?)").run(admin_id, admin_name, "Record Settlement", `Recorded ${type} of ${amount} for member ID ${member_id}`);
 
     res.json({ id: info.lastInsertRowid });
   });
@@ -339,6 +380,10 @@ async function startServer() {
 
   app.get("/api/reports/excel", async (req, res) => {
     try {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'EIM Fund Manager';
       workbook.lastModifiedBy = 'System';
@@ -359,7 +404,7 @@ async function startServer() {
       summarySheet.addRow({ metric: 'Total Collected', value: totalCollected.total || 0 });
       summarySheet.addRow({ metric: 'Total Spent', value: totalSpent.total || 0 });
       summarySheet.addRow({ metric: 'Current Balance', value: balance });
-      summarySheet.addRow({ metric: 'Report Generated At', value: new Date().toLocaleString() });
+      summarySheet.addRow({ metric: 'Report Generated At', value: new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" }) });
 
       // --- Members Sheet ---
       const membersSheet = workbook.addWorksheet('Members');
@@ -387,6 +432,51 @@ async function startServer() {
       const contributions = db.prepare("SELECT * FROM contributions").all();
       contributions.forEach((c: any) => contributionsSheet.addRow(c));
 
+      // Fetch payments early so it can be used in the matrix
+      const payments = db.prepare("SELECT * FROM payments").all();
+
+      // --- Member Contributions Matrix Sheet ---
+      const matrixSheet = workbook.addWorksheet('Member Contributions');
+      
+      const matrixColumns: any[] = [
+        { header: 'Member Name', key: 'member_name', width: 30 }
+      ];
+      
+      contributions.forEach((c: any) => {
+        matrixColumns.push({ header: c.title, key: `contrib_${c.id}`, width: 20 });
+      });
+      
+      matrixColumns.push({ header: 'Total Paid', key: 'total_paid', width: 20 });
+      
+      matrixSheet.columns = matrixColumns;
+
+      members.forEach((m: any) => {
+        const rowData: any = { member_name: m.name };
+        let totalPaid = 0;
+        
+        contributions.forEach((c: any) => {
+          const memberPayments = payments.filter((p: any) => p.member_id === m.id && p.contribution_id === c.id);
+          const amountPaid = memberPayments.reduce((sum: number, p: any) => sum + p.amount_paid, 0);
+          rowData[`contrib_${c.id}`] = amountPaid;
+          totalPaid += amountPaid;
+        });
+        
+        rowData.total_paid = totalPaid;
+        matrixSheet.addRow(rowData);
+      });
+
+      // Add a summary row at the bottom of the matrix
+      const summaryRowData: any = { member_name: 'TOTAL COLLECTED' };
+      let grandTotal = 0;
+      contributions.forEach((c: any) => {
+        const totalForContrib = payments.filter((p: any) => p.contribution_id === c.id).reduce((sum: number, p: any) => sum + p.amount_paid, 0);
+        summaryRowData[`contrib_${c.id}`] = totalForContrib;
+        grandTotal += totalForContrib;
+      });
+      summaryRowData.total_paid = grandTotal;
+      const summaryRow = matrixSheet.addRow(summaryRowData);
+      summaryRow.font = { bold: true };
+
       // --- Payments Sheet ---
       const paymentsSheet = workbook.addWorksheet('Payments');
       paymentsSheet.columns = [
@@ -397,7 +487,6 @@ async function startServer() {
         { header: 'Received By', key: 'received_by', width: 15 },
         { header: 'Date Paid', key: 'date_paid', width: 20 },
       ];
-      const payments = db.prepare("SELECT * FROM payments").all();
       payments.forEach((p: any) => paymentsSheet.addRow(p));
 
       // --- Expenses Sheet ---
@@ -415,6 +504,19 @@ async function startServer() {
       ];
       const expenses = db.prepare("SELECT * FROM expenses").all();
       expenses.forEach((e: any) => expensesSheet.addRow(e));
+
+      // --- Settlements Sheet ---
+      const settlementsSheet = workbook.addWorksheet('Settlements');
+      settlementsSheet.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Member ID', key: 'member_id', width: 15 },
+        { header: 'Amount', key: 'amount', width: 15 },
+        { header: 'Type', key: 'type', width: 15 },
+        { header: 'Handled By', key: 'handled_by', width: 15 },
+        { header: 'Date Handled', key: 'date_handled', width: 20 },
+      ];
+      const settlements = db.prepare("SELECT * FROM settlements").all();
+      settlements.forEach((s: any) => settlementsSheet.addRow(s));
 
       // --- Audit Logs Sheet ---
       const logsSheet = workbook.addWorksheet('Audit Logs');

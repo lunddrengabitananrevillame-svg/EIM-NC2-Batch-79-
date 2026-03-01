@@ -11,6 +11,7 @@ import Expenses from "./pages/Expenses";
 import AuditLogs from "./pages/AuditLogs";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
+import Settlements from "./pages/Settlements";
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="logs" element={<AuditLogs />} />
         <Route path="reports" element={<Reports />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="settlements" element={<Settlements />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

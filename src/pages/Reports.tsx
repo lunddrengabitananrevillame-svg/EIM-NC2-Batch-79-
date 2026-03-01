@@ -3,6 +3,19 @@ import { formatCurrency, formatDate } from "../lib/utils";
 import { Contribution, Expense, Member, Payment } from "../types";
 import { Printer, Download, QrCode } from "lucide-react";
 import QRCode from "react-qr-code";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
 export default function Reports() {
   const [stats, setStats] = useState({
@@ -13,30 +26,86 @@ export default function Reports() {
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
 
   useEffect(() => {
     fetchData();
+    // Poll every 2 seconds to automatically detect new data and regenerate the QR code dynamically
+    const intervalId = setInterval(fetchData, 2000);
+    return () => clearInterval(intervalId);
   }, []);
 
   const fetchData = async () => {
-    const [statsRes, contRes, expRes, payRes] = await Promise.all([
-      fetch("/api/stats"),
-      fetch("/api/contributions"),
-      fetch("/api/expenses"),
-      fetch("/api/payments"),
+    const t = Date.now();
+    const [statsRes, contRes, expRes, payRes, logsRes] = await Promise.all([
+      fetch(`/api/stats?t=${t}`),
+      fetch(`/api/contributions?t=${t}`),
+      fetch(`/api/expenses?t=${t}`),
+      fetch(`/api/payments?t=${t}`),
+      fetch(`/api/logs?t=${t}`),
     ]);
 
     setStats(await statsRes.json());
     setContributions(await contRes.json());
     setExpenses(await expRes.json());
     setPayments(await payRes.json());
+    setLogs(await logsRes.json());
   };
 
   const handlePrint = () => {
     window.print();
   };
 
-  const downloadUrl = `${window.location.origin}/api/reports/excel`;
+  // Use the Shared App URL so the QR code can be scanned by mobile devices without Google Auth
+  const baseUrl = "https://ais-pre-azwavel6gq63z7hbcbyjcd-14552172691.asia-southeast1.run.app";
+  
+  // Use the ID of the latest log entry to guarantee the QR code updates instantly when ANY data changes
+  const latestLogId = logs.length > 0 ? logs[0].id : 0;
+  
+  // Append a comprehensive dynamic hash so the QR code automatically regenerates whenever ANY data changes
+  const dataHash = `${stats.totalCollected}_${stats.totalSpent}_${latestLogId}_${payments.length}_${expenses.length}_${contributions.length}`;
+  const downloadUrl = `${baseUrl}/api/reports/excel?v=${dataHash}`;
+
+  const expensesByCategory = React.useMemo(() => {
+    const data = expenses.reduce((acc, curr) => {
+      const existing = acc.find((item) => item.name === curr.category);
+      if (existing) {
+        existing.value += curr.total_cost;
+      } else {
+        acc.push({ name: curr.category, value: curr.total_cost });
+      }
+      return acc;
+    }, [] as { name: string; value: number }[]);
+    return data.sort((a, b) => b.value - a.value);
+  }, [expenses]);
+
+  const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+
+  const monthlyData = React.useMemo(() => {
+    const monthlyMap = new Map<string, { month: string; contributions: number; expenses: number; timestamp: number }>();
+
+    payments.forEach((p) => {
+      const d = new Date(p.date_paid);
+      const monthYear = d.toLocaleDateString("en-PH", { month: "short", year: "numeric", timeZone: "Asia/Manila" });
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, { month: monthYear, contributions: 0, expenses: 0, timestamp: d.getTime() });
+      }
+      monthlyMap.get(key)!.contributions += p.amount_paid;
+    });
+
+    expenses.forEach((e) => {
+      const d = new Date(e.date_purchased);
+      const monthYear = d.toLocaleDateString("en-PH", { month: "short", year: "numeric", timeZone: "Asia/Manila" });
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, { month: monthYear, contributions: 0, expenses: 0, timestamp: d.getTime() });
+      }
+      monthlyMap.get(key)!.expenses += e.total_cost;
+    });
+
+    return Array.from(monthlyMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+  }, [payments, expenses]);
 
   return (
     <div className="space-y-8 print:space-y-4">
@@ -64,7 +133,7 @@ export default function Reports() {
       <div className="hidden print:block text-center mb-8">
         <h1 className="text-2xl font-bold">EIM Fund Manager Report</h1>
         <p className="text-sm text-gray-500">
-          Generated on: {new Date().toLocaleDateString()}
+          Generated on: {new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" })}
         </p>
       </div>
 
@@ -95,6 +164,59 @@ export default function Reports() {
             <p className="text-2xl font-bold text-blue-700">
               {formatCurrency(stats.balance)}
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Financial Visualizations */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:hidden">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-lg font-semibold mb-4 border-b pb-2">Contributions vs. Expenses (Monthly)</h2>
+          <div className="h-72">
+            {monthlyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} tickFormatter={(val) => `₱${val}`} />
+                  <Tooltip cursor={{ fill: '#f9fafb' }} formatter={(value: number) => formatCurrency(value)} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                  <Bar dataKey="contributions" name="Contributions" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="expenses" name="Expenses" fill="#dc2626" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-400 text-sm">No data available</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-lg font-semibold mb-4 border-b pb-2">Expenses by Category</h2>
+          <div className="h-72">
+            {expensesByCategory.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={expensesByCategory}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {expensesByCategory.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Legend layout="vertical" verticalAlign="middle" align="right" iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-400 text-sm">No expenses recorded</div>
+            )}
           </div>
         </div>
       </section>
@@ -202,7 +324,7 @@ export default function Reports() {
       </section>
       
       <div className="hidden print:block mt-8 text-center text-xs text-gray-400 border-t pt-4">
-        <p>&copy; {new Date().getFullYear()} EIM Fund Manager. All rights reserved.</p>
+        <p>&copy; {new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", year: "numeric" })} EIM Fund Manager. All rights reserved.</p>
         <p>Created by LUNDDREN REVILLAME (EIM Batch 79)</p>
       </div>
     </div>
